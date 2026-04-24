@@ -1,0 +1,128 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import requests
+import json
+import os
+
+# Константы
+# Получите ключ на https://exchangerate-api.com
+API_KEY = "ffe5e220cedc934699eefeb4" 
+HISTORY_FILE = "history.json"
+
+class CurrencyConverter:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Currency Converter")
+        self.root.geometry("500x550")
+
+        self.history = self.load_history()
+
+        # Интерфейс
+        tk.Label(root, text="Сумма:", font=('Arial', 10, 'bold')).pack(pady=5)
+        self.amount_entry = tk.Entry(root)
+        self.amount_entry.pack(pady=5)
+
+        tk.Label(root, text="Из:").pack()
+        self.from_curr = ttk.Combobox(root, values=["USD", "EUR", "RUB", "GBP", "JPY", "CNY", "KZT"])
+        self.from_curr.set("USD")
+        self.from_curr.pack(pady=5)
+
+        tk.Label(root, text="В:").pack()
+        self.to_curr = ttk.Combobox(root, values=["USD", "EUR", "RUB", "GBP", "JPY", "CNY", "KZT"])
+        self.to_curr.set("RUB")
+        self.to_curr.pack(pady=5)
+
+        tk.Button(root, text="Конвертировать", command=self.convert, bg='#4CAF50', fg='white').pack(pady=10)
+
+        # Таблица истории
+        tk.Label(root, text="История последних операций:").pack(pady=5)
+        self.tree = ttk.Treeview(root, columns=("Сумма", "Из", "В", "Результат"), show='headings')
+        self.tree.heading("Сумма", text="Сумма")
+        self.tree.heading("Из", text="Из")
+        self.tree.heading("В", text="В")
+        self.tree.heading("Результат", text="Результат")
+        
+        # Настройка ширины колонок
+        for col in ("Сумма", "Из", "В", "Результат"):
+            self.tree.column(col, width=100, anchor=tk.CENTER)
+            
+        self.tree.pack(pady=10, fill=tk.BOTH, expand=True)
+
+        tk.Button(root, text="Очистить историю", command=self.clear_history).pack(pady=5)
+
+        self.update_table()
+
+    def convert(self):
+        amount_str = self.amount_entry.get().replace(',', '.') # замена запятой на точку для удобства
+        
+        # Валидация ввода
+        try:
+            amount = float(amount_str)
+            if amount <= 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Ошибка", "Введите корректное положительное число")
+            return
+
+        from_c = self.from_curr.get()
+        to_c = self.to_curr.get()
+
+        # Исправленный URL (добавлена версия v6 и корректный путь)
+        url = f"https://exchangerate-api.com{API_KEY}/pair/{from_c}/{to_c}/{amount}"
+        
+        try:
+            response = requests.get(url, timeout=10)
+            data = response.json()
+
+            if data.get("result") == "success":
+                result = round(data["conversion_result"], 2)
+                
+                # Сохранение в историю
+                entry = {"amount": amount, "from": from_c, "to": to_c, "result": result}
+                self.history.append(entry)
+                self.save_history()
+                self.update_table()
+                
+                messagebox.showinfo("Готово", f"{amount} {from_c} = {result} {to_c}")
+            else:
+                error_type = data.get("error-type", "unknown-error")
+                messagebox.showerror("Ошибка API", f"Сервер вернул ошибку: {error_type}")
+                
+        except requests.exceptions.RequestException as e:
+            messagebox.showerror("Ошибка сети", "Не удалось связаться с сервером. Проверьте интернет.")
+
+    def save_history(self):
+        try:
+            with open(HISTORY_FILE, "w", encoding='utf-8') as f:
+                json.dump(self.history, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"Ошибка сохранения файла: {e}")
+
+    def load_history(self):
+        if os.path.exists(HISTORY_FILE):
+            try:
+                with open(HISTORY_FILE, "r", encoding='utf-8') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, Exception):
+                return []
+        return []
+
+    def update_table(self):
+        # Очистка таблицы перед обновлением
+        for i in self.tree.get_children():
+            self.tree.delete(i)
+        # Отображаем последние 10 записей (новые сверху)
+        for item in reversed(self.history[-10:]):
+            self.tree.insert("", tk.END, values=(item["amount"], item["from"], item["to"], item["result"]))
+
+    def clear_history(self):
+        if messagebox.askyesno("Подтверждение", "Вы уверены, что хотите очистить всю историю?"):
+            self.history = []
+            if os.path.exists(HISTORY_FILE):
+                os.remove(HISTORY_FILE)
+            self.update_table()
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = CurrencyConverter(root)
+    root.mainloop()
